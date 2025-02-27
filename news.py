@@ -188,7 +188,7 @@ if st.button("Fetch News & Analyze"):
             # Sentiment Summary
             st.write("### Sentiment Summary")
             summary_df = pd.DataFrame.from_dict(sentiment_summary, orient='index')
-            st.dataframe(summary_df.style.highlight_max(axis=0, color='#90EE90')
+            st.dataframe(summary_df.style.highlight_max(axis=0, color='#90EE90'))
             
             # Detailed News View
             st.write("### Detailed News Analysis")
