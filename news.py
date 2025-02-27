@@ -16,6 +16,8 @@ nltk.download('vader_lexicon')
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15",
 ]
 
 # Initialize sentiment analyzers
@@ -27,37 +29,45 @@ def load_vader():
 def load_finbert():
     return pipeline("text-classification", model="ProsusAI/finbert")
 
-# Updated scraping functions
+# Function to fetch Moneycontrol news
 def scrape_moneycontrol_news(company):
     search_url = f"https://www.moneycontrol.com/news/tags/{company.replace(' ', '-').lower()}.html"
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.moneycontrol.com"
+        "Referer": "https://www.google.com/",
     }
 
     try:
-        response = requests.get(search_url, headers=headers, timeout=10)
-        response.raise_for_status()
+        # Use a session to handle cookies
+        session = requests.Session()
+        response = session.get(search_url, headers=headers, timeout=10)
+        response.raise_for_status()  # Raise an error for bad status codes
         
         soup = BeautifulSoup(response.text, 'html.parser')
         articles = soup.find_all('li', class_='clearfix')[:5]
 
         return [(article.find('h2').text.strip(), article.find('a')['href'])
                 for article in articles if article.find('h2') and article.find('a')]
+    except requests.exceptions.HTTPError as e:
+        st.error(f"HTTP Error for Moneycontrol: {e}")
+        return []
     except Exception as e:
-        st.error(f"Moneycontrol Error: {str(e)}")
+        st.error(f"Error scraping Moneycontrol: {e}")
         return []
 
+# Function to fetch Economic Times news
 def scrape_economic_times_news(company):
     search_url = f"https://economictimes.indiatimes.com/topic/{company.replace(' ', '%20')}"
     headers = {
         "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
     try:
-        response = requests.get(search_url, headers=headers, timeout=10)
+        session = requests.Session()
+        response = session.get(search_url, headers=headers, timeout=10)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -66,19 +76,24 @@ def scrape_economic_times_news(company):
         return [(article.find('h3').text.strip(), 
                 f"https://economictimes.indiatimes.com{article.find('a')['href']}")
                 for article in articles if article.find('h3') and article.find('a')]
+    except requests.exceptions.HTTPError as e:
+        st.error(f"HTTP Error for Economic Times: {e}")
+        return []
     except Exception as e:
-        st.error(f"Economic Times Error: {str(e)}")
+        st.error(f"Error scraping Economic Times: {e}")
         return []
 
+# Function to fetch Yahoo Finance news
 def scrape_yahoo_finance_news(company):
     try:
         ticker = yf.Ticker(company)
         news = ticker.news[:5]
         return [(item['title'], item['link']) for item in news if 'title' in item and 'link' in item]
     except Exception as e:
-        st.error(f"Yahoo Finance Error: {str(e)}")
+        st.error(f"Yahoo Finance Error: {e}")
         return []
 
+# Function to get news from available sources
 def fetch_news(company):
     sources = [
         ("Moneycontrol", scrape_moneycontrol_news),
@@ -91,7 +106,7 @@ def fetch_news(company):
         if news:
             return news
         st.warning(f"{source_name} failed for {company}. Trying next source...")
-        time.sleep(2)
+        time.sleep(random.uniform(2, 5))  # Random delay between requests
     
     return []
 
@@ -112,7 +127,7 @@ def analyze_sentiment(text, method):
             result = finbert(text[:512], truncation=True)[0]  # Truncate to 512 tokens
             return result['label'].capitalize()
     except Exception as e:
-        st.error(f"Sentiment Analysis Error: {str(e)}")
+        st.error(f"Sentiment Analysis Error: {e}")
         return "Error"
 
 # Streamlit UI
@@ -189,7 +204,7 @@ if st.button("Fetch News & Analyze"):
             st.write("### Sentiment Summary")
             summary_df = pd.DataFrame.from_dict(sentiment_summary, orient='index')
             st.dataframe(summary_df.style.highlight_max(axis=0, color='#90EE90'))
-            
+
             # Detailed News View
             st.write("### Detailed News Analysis")
             for company, articles in news_data.items():
