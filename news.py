@@ -3,219 +3,144 @@ import streamlit as st
 import random
 import time
 from bs4 import BeautifulSoup
+from textblob import TextBlob
 import pandas as pd
-import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
-from transformers import pipeline
-import yfinance as yf
-
-# Download NLTK resources
-nltk.download('vader_lexicon')
 
 # List of rotating User-Agents
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15",
 ]
-
-# Initialize sentiment analyzers
-@st.cache_resource
-def load_vader():
-    return SentimentIntensityAnalyzer()
-
-@st.cache_resource
-def load_finbert():
-    return pipeline("text-classification", model="ProsusAI/finbert")
 
 # Function to fetch Moneycontrol news
 def scrape_moneycontrol_news(company):
     search_url = f"https://www.moneycontrol.com/news/tags/{company.replace(' ', '-').lower()}.html"
-    headers = {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.google.com/",
-    }
+    headers = {"User-Agent": random.choice(USER_AGENTS)}
 
     try:
-        # Use a session to handle cookies
-        session = requests.Session()
-        response = session.get(search_url, headers=headers, timeout=10)
-        response.raise_for_status()  # Raise an error for bad status codes
+        response = requests.get(search_url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return []
         
         soup = BeautifulSoup(response.text, 'html.parser')
         articles = soup.find_all('li', class_='clearfix')[:5]
 
-        return [(article.find('h2').text.strip(), article.find('a')['href'])
-                for article in articles if article.find('h2') and article.find('a')]
-    except requests.exceptions.HTTPError as e:
-        st.error(f"HTTP Error for Moneycontrol: {e}")
-        return []
-    except Exception as e:
-        st.error(f"Error scraping Moneycontrol: {e}")
-        return []
+        news_list = []
+        for article in articles:
+            title = article.find('h2')
+            link = article.find('a', href=True)
+            if title and link:
+                news_list.append((title.text.strip(), link['href']))
 
-# Function to fetch Economic Times news
-def scrape_economic_times_news(company):
-    search_url = f"https://economictimes.indiatimes.com/topic/{company.replace(' ', '%20')}"
-    headers = {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-
-    try:
-        session = requests.Session()
-        response = session.get(search_url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        articles = soup.find_all('div', {'class': 'story_list'})[:5]
-
-        return [(article.find('h3').text.strip(), 
-                f"https://economictimes.indiatimes.com{article.find('a')['href']}")
-                for article in articles if article.find('h3') and article.find('a')]
-    except requests.exceptions.HTTPError as e:
-        st.error(f"HTTP Error for Economic Times: {e}")
+        return news_list
+    except Exception:
         return []
-    except Exception as e:
-        st.error(f"Error scraping Economic Times: {e}")
-        return []
-
-# Function to fetch Yahoo Finance news
-def scrape_yahoo_finance_news(company):
-    try:
-        ticker = yf.Ticker(company)
-        news = ticker.news[:5]
-        return [(item['title'], item['link']) for item in news if 'title' in item and 'link' in item]
-    except Exception as e:
-        st.error(f"Yahoo Finance Error: {e}")
-        return []
-
-# Function to get news from available sources
-def fetch_news(company):
-    sources = [
-        ("Moneycontrol", scrape_moneycontrol_news),
-        ("Economic Times", scrape_economic_times_news),
-        ("Yahoo Finance", scrape_yahoo_finance_news)
-    ]
-    
-    for source_name, scraper in sources:
-        news = scraper(company)
-        if news:
-            return news
-        st.warning(f"{source_name} failed for {company}. Trying next source...")
-        time.sleep(random.uniform(2, 5))  # Random delay between requests
-    
-    return []
 
 # Sentiment Analysis Function
-def analyze_sentiment(text, method):
-    try:
-        if method == "VADER":
-            sia = load_vader()
-            scores = sia.polarity_scores(text)
-            compound = scores['compound']
-            if compound >= 0.05:
-                return "Positive"
-            elif compound <= -0.05:
-                return "Negative"
-            return "Neutral"
-        elif method == "FinBERT":
-            finbert = load_finbert()
-            result = finbert(text[:512], truncation=True)[0]  # Truncate to 512 tokens
-            return result['label'].capitalize()
-    except Exception as e:
-        st.error(f"Sentiment Analysis Error: {e}")
-        return "Error"
+def analyze_sentiment(text):
+    sentiment = TextBlob(text).sentiment.polarity
+    if sentiment > 0:
+        return "Positive"
+    elif sentiment < 0:
+        return "Negative"
+    else:
+        return "Neutral"
 
 # Streamlit UI
-st.title("News Scraper & Sentiment Analyzer")
+st.title("Stock News Scraper & Sentiment Analysis")
 
-# Input improvements
-st.markdown("**Enter company names or stock tickers (e.g., 'Apple' or 'AAPL'):**")
-companies_input = st.text_area("Separate multiple entries with commas", 
-                             placeholder="Apple, AAPL, Tata Motors")
+# Manual company input
+companies_input = st.text_area("Enter company names (comma-separated)", "HDFCBANK, TATASTEEL, HINDALCO")
 
-method = st.radio("Sentiment Analysis Model:", 
-                 ("VADER (General Purpose)", "FinBERT (Financial Specific)"),
-                 index=1).split()[0]
-
+# Process button
 if st.button("Fetch News & Analyze"):
     companies = [c.strip() for c in companies_input.split(",") if c.strip()]
     
     if not companies:
-        st.error("Please enter at least one company name/ticker")
+        st.error("❌ Please enter at least one company name.")
     else:
-        progress_bar = st.progress(0)
-        news_data = {}
+        st.write(f"Fetching news for **{len(companies)}** companies safely...")
+
+        news_data = []
         sentiment_summary = {}
 
-        for idx, company in enumerate(companies):
-            progress = (idx + 1) / len(companies)
-            progress_bar.progress(progress)
-            
-            st.subheader(f"Analyzing: {company}")
-            with st.spinner(f"Fetching news for {company}..."):
-                news = fetch_news(company)
-            
-            if not news:
-                st.warning(f"No news found for {company}")
-                continue
+        for company in companies:
+            st.write(f"Fetching news for **{company}**...")
 
-            # Process news
-            company_news = []
-            pos = neg = neu = 0
-            
-            for headline, link in news:
-                sentiment = analyze_sentiment(headline, method)
-                company_news.append((headline, sentiment, link))
-                
-                if sentiment == "Positive": pos += 1
-                elif sentiment == "Negative": neg += 1
-                else: neu += 1
+            # Try Moneycontrol first
+            headlines = scrape_moneycontrol_news(company)
 
-            # Determine overall sentiment
-            total = pos + neg + neu
-            verdict = "Neutral"
-            if total > 0:
-                if pos/total > 0.4: verdict = "Positive"
-                elif neg/total > 0.4: verdict = "Negative"
+            pos_count, neg_count, neu_count = 0, 0, 0
 
-            # Store results
-            news_data[company] = company_news
-            sentiment_summary[company] = {
-                "Positive": pos,
-                "Negative": neg,
-                "Neutral": neu,
-                "Verdict": verdict
-            }
+            for headline, link in headlines:
+                sentiment = analyze_sentiment(headline)
+                if sentiment == "Positive":
+                    pos_count += 1
+                elif sentiment == "Negative":
+                    neg_count += 1
+                else:
+                    neu_count += 1
 
-            # Display results
-            st.success(f"Analyzed {len(news)} articles - Overall Sentiment: {verdict}")
-            time.sleep(1)  # Visual progress spacing
+                news_data.append([company, headline, sentiment, link])
 
-        # Display final results
-        st.subheader("Final Analysis Report")
-        
+            # Calculate overall verdict
+            if pos_count > neg_count and pos_count > neu_count:
+                verdict = "Positive"
+            elif neg_count > pos_count and neg_count > neu_count:
+                verdict = "Negative"
+            else:
+                verdict = "Neutral"
+
+            sentiment_summary[company] = [pos_count, neg_count, neu_count, verdict]
+
+            time.sleep(random.uniform(3, 6))  # Random delay between requests
+
+        # Display News Table
         if news_data:
-            # Sentiment Summary
+            st.write("### 📰 News Sentiment Analysis")
+
+            news_table_html = """
+            <style>
+                table { width: 100%; border-collapse: collapse; }
+                th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+                th { background-color: #4CAF50; color: white; }
+                tr:hover { background-color: #f5f5f5; }
+                a { text-decoration: none; color: blue; }
+            </style>
+            <table>
+                <tr>
+                    <th>Company</th>
+                    <th>Headline</th>
+                    <th>Sentiment</th>
+                    <th>Link</th>
+                </tr>
+            """
+            for row in news_data:
+                news_table_html += f"""
+                <tr>
+                    <td>{row[0]}</td>
+                    <td>{row[1]}</td>
+                    <td>{row[2]}</td>
+                    <td><a href="{row[3]}" target="_blank">🔗 Open Article</a></td>
+                </tr>
+                """
+            news_table_html += "</table>"
+
+            st.markdown(news_table_html, unsafe_allow_html=True)
+
+            # Sentiment Summary Table
+            summary_df = pd.DataFrame.from_dict(sentiment_summary, orient='index', columns=['Positive', 'Negative', 'Neutral', 'Verdict'])
+            summary_df.index.name = "Company"
+
             st.write("### Sentiment Summary")
-            summary_df = pd.DataFrame.from_dict(sentiment_summary, orient='index')
-            st.dataframe(summary_df.style.highlight_max(axis=0, color='#90EE90'))
+            st.dataframe(summary_df, use_container_width=True)  # Wider table
 
-            # Detailed News View
-            st.write("### Detailed News Analysis")
-            for company, articles in news_data.items():
-                with st.expander(f"{company} ({len(articles)} articles)"):
-                    for headline, sentiment, link in articles:
-                        st.markdown(f"""
-                        **{headline}**  
-                        Sentiment: `{sentiment}`  
-                        [Read Article]({link})  
-                        """)
+            # Download option
+            csv_output = pd.DataFrame(news_data, columns=['Company', 'Headline', 'Sentiment', 'Link']).to_csv(index=False).encode('utf-8')
+            st.download_button(label=" Download News Data", data=csv_output, file_name="news_sentiment_analysis.csv", mime="text/csv")
+
+            summary_csv = summary_df.to_csv(index=True).encode('utf-8')
+            st.download_button(label=" Download Sentiment Summary", data=summary_csv, file_name="sentiment_summary.csv", mime="text/csv")
+
         else:
-            st.error("No news found across all sources for the given companies")
-
-        progress_bar.empty()
+            st.warning("⚠ No news articles found for the given companies.")
