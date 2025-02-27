@@ -1,0 +1,8 @@
+requests
+streamlit
+beautifulsoup4
+pandas
+nltk
+transformers
+yfinance
+torch
