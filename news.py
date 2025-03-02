@@ -49,7 +49,7 @@ def fetch_news_newsdata(company):
         response = session_news.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
-        return [(article["title"], article["description"], article["link"]) for article in data.get("results", [])[:5]]
+        return [(article["title"], article.get("description", "No summary available"), article["link"]) for article in data.get("results", [])[:5]]
     except Exception:
         return []
 
@@ -62,7 +62,7 @@ def scrape_moneycontrol_news(company):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         articles = soup.find_all('li', class_='clearfix')[:5]
-        return [(article.find('h2').text.strip(), "No summary available", article.find('a')['href']) for article in articles if article.find('h2')]
+        return [(article.find('h2').text.strip(), None, article.find('a')['href']) for article in articles if article.find('h2')]
     except Exception:
         return []
 
@@ -75,7 +75,7 @@ def scrape_bing_news(company):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         articles = soup.find_all("div", class_="news-card")[:5]
-        return [(a.find("a").get_text(strip=True), "No summary available", a.find("a")["href"]) for a in articles if a.find("a")]
+        return [(a.find("a").get_text(strip=True), None, a.find("a")["href"]) for a in articles if a.find("a")]
     except Exception:
         return []
 
@@ -111,7 +111,7 @@ def fetch_and_analyze_news(company, method="VADER", use_newsdata=False, aggregat
 
     for headline, summary, link in news_sources:
         sentiment = analyze_sentiment(headline, method).capitalize()  # Ensure uniform sentiment labels
-        analyzed_news.append((headline, summary, sentiment, link))
+        analyzed_news.append((headline, summary or "No summary available", sentiment, link))
 
         if sentiment not in ["Positive", "Negative", "Neutral"]:
             sentiment = "Neutral"  # Handle unexpected sentiment values
