@@ -18,8 +18,7 @@ nltk.download('vader_lexicon')
 # -----------------------------
 # 1) Configuration
 # -----------------------------
-# Replace with your valid NewsData.io API key
-NEWS_API_KEY = "pub_726340e45067fcad1d9a6d2fef24ba983aab3"
+NEWS_API_KEY = "YOUR_API_KEY_HERE"  # Replace with your actual API key
 
 @st.cache_resource
 def load_summarizer():
@@ -49,135 +48,81 @@ USER_AGENTS = [
 ]
 
 # -----------------------------
-# 2) News Fetching (Improved)
+# 2) News Fetching (Fixed)
 # -----------------------------
 
 def fetch_news_newsdata(company):
-    """Improved with proper URL encoding and error handling"""
+    """Fetch news from NewsData.io with improved error handling"""
     url = "https://newsdata.io/api/1/news"
+    
     params = {
         "apikey": NEWS_API_KEY,
-        "q": company,
+        "q": quote(company),  # Proper encoding
         "language": "en",
         "page": 1
     }
     
     try:
         response = session_news.get(url, params=params, timeout=15)
+        st.write(f"Request URL: {response.url}")  # Debugging info
         response.raise_for_status()
+        
         data = response.json()
-        
-        results = []
-        for art in data.get("results", [])[:5]:
-            title = art.get("title", "No Title")
-            desc = art.get("description") or "No summary available"
-            link = art.get("link", "")
-            results.append((title, desc, link))
-        return results
-    except Exception as e:
-        st.error(f"NewsData.io API Error: {str(e)}")
-        return []
+        if "results" not in data:
+            st.error(f"Unexpected API response: {data}")
+            return []
 
-def scrape_moneycontrol_news(company):
-    """Updated CSS selectors for MoneyControl"""
-    formatted_company = company.replace(' ', '-').lower()
-    search_url = f"https://www.moneycontrol.com/news/tags/{formatted_company}.html"
+        return [(art.get("title", "No Title"), art.get("description", "No summary available"), art.get("link", ""))
+                for art in data["results"][:5]]
     
-    try:
-        headers = {"User-Agent": random.choice(USER_AGENTS)}
-        response = session_news.get(search_url, headers=headers, timeout=15)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        articles = soup.find_all('li', class_='clearfix')[:5]
-        
-        results = []
-        for art in articles:
-            title_tag = art.find('h2')
-            if not title_tag:
-                continue
-                
-            title = title_tag.text.strip()
-            link_tag = art.find('a', href=True)
-            link = link_tag['href'] if link_tag else ""
-            
-            # Extract summary from sibling div
-            summary_tag = art.find('p', class_='news_desc')
-            summary = summary_tag.text.strip() if summary_tag else None
-            
-            results.append((title, summary, link))
-        return results
-    except Exception as e:
-        st.error(f"MoneyControl Error: {str(e)}")
+    except requests.exceptions.RequestException as e:
+        st.error(f"NewsData.io API Error: {e}")
         return []
 
 def scrape_google_news(company):
-    """Alternative news source using Google News"""
-    formatted_query = quote(company)
-    url = f"https://news.google.com/rss/search?q={formatted_query}&hl=en-IN&gl=IN&ceid=IN:en"
+    """Fetch news from Google News RSS"""
+    url = f"https://news.google.com/rss/search?q={quote(company)}&hl=en-IN&gl=IN&ceid=IN:en"
     
     try:
         response = session_news.get(url, timeout=15)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'xml')
-        items = soup.find_all('item')[:5]
-        
-        results = []
-        for item in items:
-            title = item.title.text if item.title else "No Title"
-            link = item.link.text if item.link else ""
-            description = item.description.text if item.description else None
-            results.append((title, description, link))
-        return results
+        return [(item.title.text, item.description.text if item.description else "No summary available", item.link.text)
+                for item in soup.find_all('item')[:5]]
     except Exception as e:
-        st.error(f"Google News Error: {str(e)}")
+        st.error(f"Google News Error: {e}")
         return []
 
 # -----------------------------
-# 3) Enhanced Article Parsing
+# 3) Article Parsing
 # -----------------------------
 
 def parse_article_content(url):
-    """Improved content extraction with better HTML parsing"""
+    """Extract content from news articles"""
     try:
         headers = {"User-Agent": random.choice(USER_AGENTS)}
         response = session_news.get(url, headers=headers, timeout=20)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Try to find article body using common semantic tags
-        article_body = soup.find('article') or soup.find('div', class_='article-content')
-        
-        if not article_body:
-            # Fallback to paragraph extraction
-            paragraphs = soup.find_all('p')
-            text = ' '.join([p.get_text() for p in paragraphs])
-        else:
-            text = ' '.join([p.get_text() for p in article_body.find_all('p')])
-        
-        return text.strip()[:5000]  # Limit to 5000 characters
+        paragraphs = soup.find_all('p')
+        return ' '.join([p.get_text() for p in paragraphs])[:5000]  # Limit to 5000 characters
     except Exception:
         return ""
 
 # -----------------------------
-# 4) Enhanced Summarization
+# 4) Text Summarization
 # -----------------------------
 
 def generate_summary(text):
-    """Improved summarization with error handling"""
+    """Summarize extracted article text"""
     if not text or len(text) < 100:
         return "No summary available"
     
     try:
         summarizer = load_summarizer()
-        summary = summarizer(
-            text,
-            max_length=100,
-            min_length=30,
-            do_sample=False
-        )
+        summary = summarizer(text, max_length=100, min_length=30, do_sample=False)
         return summary[0]['summary_text']
     except Exception:
         return "Summary generation failed"
@@ -187,86 +132,56 @@ def generate_summary(text):
 # -----------------------------
 
 def analyze_sentiment(text, method):
-    """Enhanced with text preprocessing"""
+    """Analyze sentiment using VADER or FinBERT"""
     if not text:
         return "Neutral"
     
-    # Preprocess text
     clean_text = ' '.join(text.split()[:512])  # Truncate to 512 words
     
     try:
         if method == "VADER":
-            sia = load_vader()
-            scores = sia.polarity_scores(clean_text)
-            if scores['compound'] >= 0.05:
-                return "Positive"
-            elif scores['compound'] <= -0.05:
-                return "Negative"
-            return "Neutral"
+            scores = load_vader().polarity_scores(clean_text)
+            return "Positive" if scores['compound'] >= 0.05 else "Negative" if scores['compound'] <= -0.05 else "Neutral"
         elif method == "FinBERT":
-            finbert = load_finbert()
-            result = finbert(clean_text, truncation=True)[0]
+            result = load_finbert()(clean_text, truncation=True)[0]
             return result['label'].capitalize()
     except Exception:
         return "Neutral"
 
 # -----------------------------
-# 6) Main Processing Function
+# 6) Fetch & Analyze News
 # -----------------------------
 
 def fetch_and_analyze_news(company, method="VADER", use_newsdata=False):
-    """Improved news aggregation and processing"""
-    sources = []
+    """Fetch, summarize, and analyze sentiment of news"""
+    sources = [fetch_news_newsdata(company)] if use_newsdata else [scrape_google_news(company)]
     
-    if use_newsdata:
-        sources.append(fetch_news_newsdata(company))
-    else:
-        sources.append(scrape_moneycontrol_news(company))
-        sources.append(scrape_google_news(company))
+    articles = [article for source in sources for article in source]
     
-    all_articles = [article for source in sources for article in source]
-    
-    if not all_articles:
+    if not articles:
         return "Neutral", []
-    
+
     sentiment_counts = {"Positive": 0, "Negative": 0, "Neutral": 0}
     analyzed_news = []
-    
-    for title, summary, link in all_articles:
-        # Generate summary if missing
-        if not summary:
-            article_text = parse_article_content(link)
-            summary = generate_summary(article_text) if article_text else "No summary available"
-        
-        # Analyze sentiment using both title and summary
-        combined_text = f"{title}. {summary}"
-        sentiment = analyze_sentiment(combined_text, method)
+
+    for title, summary, link in articles:
+        summary = summary or generate_summary(parse_article_content(link))
+        sentiment = analyze_sentiment(f"{title}. {summary}", method)
         
         sentiment_counts[sentiment] += 1
         analyzed_news.append((title, summary, sentiment, link))
-    
-    # Determine overall sentiment
+
     total = sum(sentiment_counts.values())
-    if total == 0:
-        return "Neutral", analyzed_news
-    
-    pos_ratio = sentiment_counts["Positive"] / total
-    neg_ratio = sentiment_counts["Negative"] / total
-    
-    if pos_ratio > 0.4:
-        overall = "Positive"
-    elif neg_ratio > 0.4:
-        overall = "Negative"
-    else:
-        overall = "Neutral"
-    
+    overall = ("Positive" if sentiment_counts["Positive"] / total > 0.4 else
+               "Negative" if sentiment_counts["Negative"] / total > 0.4 else "Neutral") if total > 0 else "Neutral"
+
     return overall, analyzed_news
 
 # -----------------------------
 # 7) Streamlit UI
 # -----------------------------
 
-st.title("📈 Advanced Stock News Sentiment Analyzer")
+st.title("📈 Stock News Sentiment Analyzer")
 
 company = st.text_input("Enter Company Name", "Reliance Industries")
 method = st.selectbox("Sentiment Analysis Method", ["VADER", "FinBERT"])
@@ -275,34 +190,24 @@ use_newsdata = st.checkbox("Use NewsData.io API (requires valid API key)")
 if st.button("Analyze News Sentiment"):
     with st.spinner("Gathering and analyzing news..."):
         start_time = time.time()
-        overall, articles = fetch_and_analyze_news(
-            company,
-            method=method,
-            use_newsdata=use_newsdata
-        )
+        overall, articles = fetch_and_analyze_news(company, method, use_newsdata)
     
     st.subheader(f"Overall Sentiment: **{overall}**")
     
     # Display sentiment distribution
-    counts = pd.DataFrame({
-        "Sentiment": ["Positive", "Negative", "Neutral"],
-        "Count": [
-            sum(1 for a in articles if a[2] == "Positive"),
-            sum(1 for a in articles if a[2] == "Negative"),
-            sum(1 for a in articles if a[2] == "Neutral")
-        ]
-    })
+    counts = pd.DataFrame({"Sentiment": ["Positive", "Negative", "Neutral"],
+                           "Count": [sum(1 for a in articles if a[2] == "Positive"),
+                                     sum(1 for a in articles if a[2] == "Negative"),
+                                     sum(1 for a in articles if a[2] == "Neutral")]})
     st.bar_chart(counts.set_index("Sentiment"))
     
-    # Display individual articles
-    st.subheader("Detailed News Analysis")
+    # Display news articles
+    st.subheader("News Analysis")
     for idx, (title, summary, sentiment, link) in enumerate(articles, 1):
         with st.expander(f"{idx}. {sentiment} - {title[:70]}..."):
             st.markdown(f"**Summary:** {summary}")
-            st.markdown(f"**Sentiment Analysis:** {sentiment}")
+            st.markdown(f"**Sentiment:** {sentiment}")
             if link:
                 st.markdown(f"[Read full article ↗️]({link})")
-    
-    st.write(f"Analysis completed in {time.time()-start_time:.2f} seconds")
 
-st.info("Note: This tool uses web scraping for some sources. Results may vary based on news availability and website structures.")
+st.info("This tool uses web scraping; results depend on news availability and sources.")
