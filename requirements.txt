@@ -1,8 +1,13 @@
-requests
 streamlit
+requests
 beautifulsoup4
-pandas
 nltk
 transformers
-yfinance
 torch
+pandas
+numpy
+scikit-learn
+pandas-ta
+yfinance
+tensorflow
+sentencepiece
