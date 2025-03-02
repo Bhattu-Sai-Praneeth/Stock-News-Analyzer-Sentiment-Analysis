@@ -19,7 +19,7 @@ nltk.download('vader_lexicon')
 # 1) Configuration
 # -----------------------------
 # Replace with your valid NewsData.io API key
-NEWS_API_KEY "pub_726340e45067fcad1d9a6d2fef24ba983aab3"
+NEWS_API_KEY = "pub_726340e45067fcad1d9a6d2fef24ba983aab3"
 
 @st.cache_resource
 def load_summarizer():
